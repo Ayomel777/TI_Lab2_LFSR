@@ -1,6 +1,5 @@
 # README.md
 
-```markdown
 # 🔐 LFSR Encryption
 
 Десктопное приложение для шифрования файлов с использованием алгоритма LFSR (Linear Feedback Shift Register).
@@ -68,4 +67,3 @@ wails build
 4. Нажмите кнопку обработки
 5. Выберите место сохранения
 
-```
