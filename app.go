@@ -2,170 +2,406 @@ package main
 
 import (
 	"context"
-	"errors"
+	"encoding/base64"
 	"fmt"
-	"io"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// App struct
 type App struct {
-	ctx  context.Context
-	lfsr *LFSR
-	key  string // двоичное представление ключа (37 символов)
+	ctx context.Context
 }
 
-// LFSR структура регистра сдвига с линейной обратной связью
-type LFSR struct {
-	state uint64
+func NewApp() *App {
+	return &App{}
 }
 
-// константы для многочлена x^37 + x^12 + x^10 + x^2 + 1
-const (
-	lfsrTaps = (1 << 37) | (1 << 12) | (1 << 10) | (1 << 2) | 1
-	lfsrMask = (1 << 37) - 1
-)
-
-// NewLFSR создает новый LFSR с начальным состоянием
-func NewLFSR(seed uint64) *LFSR {
-	return &LFSR{state: seed & lfsrMask}
-}
-
-// NextByte возвращает следующий байт гаммы и обновляет состояние
-func (l *LFSR) NextByte() byte {
-	var out byte
-	for i := 0; i < 8; i++ {
-		// Вычисляем обратную связь: XOR битов на позициях отводов
-		// отводы: 37, 6, 4, 1, 0
-		feedback := ((l.state >> 37) & 1) ^
-			((l.state >> 6) & 1) ^
-			((l.state >> 4) & 1) ^
-			((l.state >> 1) & 1) ^
-			(l.state & 1)
-		// Сдвигаем влево, младший бит = feedback
-		l.state = ((l.state << 1) | uint64(feedback)) & lfsrMask
-		// Формируем байт: первый бит становится старшим
-		out = (out << 1) | byte(feedback)
-	}
-	return out
-}
-
-// Startup вызывается при старте приложения
-func (a *App) Startup(ctx context.Context) {
+func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 }
 
-// SetKey устанавливает ключ из двоичной строки (ровно 37 символов '0'/'1')
-func (a *App) SetKey(key string) error {
-	if len(key) != 37 {
-		return fmt.Errorf("key must be exactly 37 bits, got %d", len(key))
-	}
-	var seed uint64
-	for i, ch := range key {
-		if ch != '0' && ch != '1' {
-			return fmt.Errorf("key must contain only 0 and 1, invalid character at position %d", i)
+// Результат операции
+type OperationResult struct {
+	Success       bool   `json:"success"`
+	Message       string `json:"message"`
+	BinaryKey     string `json:"binaryKey"`
+	KeyStream     string `json:"keyStream"`
+	OriginalSize  int    `json:"originalSize"`
+	ProcessedSize int    `json:"processedSize"`
+	OutputPath    string `json:"outputPath"`
+}
+
+// Результат валидации ключа
+type KeyValidationResult struct {
+	Valid     bool   `json:"valid"`
+	BinaryKey string `json:"binaryKey"`
+	Message   string `json:"message"`
+	KeyLength int    `json:"keyLength"`
+}
+
+// Конвертация любого ключа в бинарный
+func (a *App) ConvertToBinaryKey(input string) KeyValidationResult {
+	if input == "" {
+		return KeyValidationResult{
+			Valid:   false,
+			Message: "Ключ не может быть пустым",
 		}
-		seed = (seed << 1) | uint64(ch-'0')
-	}
-	a.lfsr = NewLFSR(seed)
-	a.key = key
-	return nil
-}
-
-// GetKeyInfo возвращает текущий ключ (для отображения)
-func (a *App) GetKeyInfo() string {
-	return a.key
-}
-
-// Encrypt шифрует файл (input → output) с использованием текущего ключа
-func (a *App) Encrypt(inputPath, outputPath string) error {
-	return a.processFile(inputPath, outputPath)
-}
-
-// Decrypt дешифрует (аналогично Encrypt, так как XOR симметричен)
-func (a *App) Decrypt(inputPath, outputPath string) error {
-	return a.processFile(inputPath, outputPath)
-}
-
-// processFile содержит общую логику шифрования/дешифрования
-func (a *App) processFile(inPath, outPath string) error {
-	if a.lfsr == nil {
-		return errors.New("key not set")
 	}
 
-	inFile, err := os.Open(inPath)
-	if err != nil {
-		return fmt.Errorf("cannot open input file: %w", err)
+	binaryKey := convertInputToBinary(input)
+
+	return KeyValidationResult{
+		Valid:     true,
+		BinaryKey: binaryKey,
+		KeyLength: len(binaryKey),
+		Message:   fmt.Sprintf("Ключ успешно преобразован. Длина: %d бит", len(binaryKey)),
 	}
-	defer inFile.Close()
+}
 
-	outFile, err := os.Create(outPath)
-	if err != nil {
-		return fmt.Errorf("cannot create output file: %w", err)
-	}
-	defer outFile.Close()
-
-	const bufSize = 4096
-	buf := make([]byte, bufSize)
-
-	for {
-		n, err := inFile.Read(buf)
-		if n > 0 {
-			// Генерируем гамму для прочитанных байт
-			gamma := make([]byte, n)
-			for i := 0; i < n; i++ {
-				gamma[i] = a.lfsr.NextByte()
-			}
-			// XOR
-			for i := 0; i < n; i++ {
-				buf[i] ^= gamma[i]
-			}
-			if _, err := outFile.Write(buf[:n]); err != nil {
-				return fmt.Errorf("error writing output file: %w", err)
-			}
-		}
-		if err == io.EOF {
+// Конвертация входных данных в бинарную строку
+func convertInputToBinary(input string) string {
+	// Проверяем, является ли ввод уже бинарным
+	isBinary := true
+	for _, c := range input {
+		if c != '0' && c != '1' {
+			isBinary = false
 			break
 		}
-		if err != nil {
-			return fmt.Errorf("error reading input file: %w", err)
+	}
+
+	if isBinary && len(input) > 0 {
+		return input
+	}
+
+	// Конвертируем каждый символ в бинарное представление
+	var binary strings.Builder
+	for _, c := range input {
+		binary.WriteString(fmt.Sprintf("%08b", c))
+	}
+
+	return binary.String()
+}
+
+// Выбор файла для обработки
+func (a *App) SelectInputFile() (string, error) {
+	file, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Выберите файл для обработки",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "Все файлы", Pattern: "*.*"},
+			{DisplayName: "Изображения", Pattern: "*.png;*.jpg;*.jpeg;*.gif;*.bmp"},
+			{DisplayName: "Видео", Pattern: "*.mp4;*.avi;*.mkv;*.mov"},
+			{DisplayName: "Аудио", Pattern: "*.mp3;*.wav;*.flac;*.ogg"},
+			{DisplayName: "Документы", Pattern: "*.txt;*.pdf;*.doc;*.docx"},
+		},
+	})
+	return file, err
+}
+
+// Выбор места сохранения
+func (a *App) SelectOutputFile(defaultName string) (string, error) {
+	file, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "Сохранить зашифрованный файл",
+		DefaultFilename: defaultName,
+	})
+	return file, err
+}
+
+// Шифрование файла
+func (a *App) EncryptFile(inputPath, key string) OperationResult {
+	if inputPath == "" {
+		return OperationResult{
+			Success: false,
+			Message: "Не выбран входной файл",
 		}
 	}
-	return nil
+
+	if key == "" {
+		return OperationResult{
+			Success: false,
+			Message: "Ключ не может быть пустым",
+		}
+	}
+
+	// Читаем входной файл
+	data, err := os.ReadFile(inputPath)
+	if err != nil {
+		return OperationResult{
+			Success: false,
+			Message: fmt.Sprintf("Ошибка чтения файла: %v", err),
+		}
+	}
+
+	// Конвертируем ключ в бинарный
+	binaryKey := convertInputToBinary(key)
+
+	// Проверяем минимальную длину ключа (37 бит для LFSR)
+	if len(binaryKey) < 37 {
+		return OperationResult{
+			Success: false,
+			Message: fmt.Sprintf("Длина ключа должна быть минимум 37 бит. Текущая длина: %d бит", len(binaryKey)),
+		}
+	}
+
+	// Создаем LFSR и шифруем
+	lfsr := NewLFSR(binaryKey)
+	keyStream := lfsr.GenerateKeyStream(len(data))
+	encrypted := xorBytes(data, keyStream)
+
+	// Генерируем имя выходного файла
+	ext := filepath.Ext(inputPath)
+	baseName := strings.TrimSuffix(filepath.Base(inputPath), ext)
+	defaultOutput := baseName + "_encrypted" + ext
+
+	// Выбираем место сохранения
+	outputPath, err := a.SelectOutputFile(defaultOutput)
+	if err != nil || outputPath == "" {
+		return OperationResult{
+			Success: false,
+			Message: "Не выбрано место сохранения",
+		}
+	}
+
+	// Сохраняем зашифрованный файл
+	err = os.WriteFile(outputPath, encrypted, 0644)
+	if err != nil {
+		return OperationResult{
+			Success: false,
+			Message: fmt.Sprintf("Ошибка сохранения файла: %v", err),
+		}
+	}
+
+	// Формируем отображение keystream (первые 256 бит)
+	keyStreamDisplay := formatKeyStream(keyStream, 256)
+
+	return OperationResult{
+		Success:       true,
+		Message:       "Файл успешно зашифрован",
+		BinaryKey:     truncateString(binaryKey, 512),
+		KeyStream:     keyStreamDisplay,
+		OriginalSize:  len(data),
+		ProcessedSize: len(encrypted),
+		OutputPath:    outputPath,
+	}
 }
 
-// OpenFileDialog открывает диалог выбора файла и возвращает выбранный путь
-func (a *App) OpenFileDialog() (string, error) {
-	file, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title: "Выберите файл для шифрования/дешифрования",
-		Filters: []runtime.FileFilter{
-			{
-				DisplayName: "Все файлы",
-				Pattern:     "*",
-			},
-		},
-	})
-	if err != nil {
-		return "", err
+// Дешифрование файла
+func (a *App) DecryptFile(inputPath, key string) OperationResult {
+	if inputPath == "" {
+		return OperationResult{
+			Success: false,
+			Message: "Не выбран входной файл",
+		}
 	}
-	return file, nil
+
+	if key == "" {
+		return OperationResult{
+			Success: false,
+			Message: "Ключ не может быть пустым",
+		}
+	}
+
+	// Читаем входной файл
+	data, err := os.ReadFile(inputPath)
+	if err != nil {
+		return OperationResult{
+			Success: false,
+			Message: fmt.Sprintf("Ошибка чтения файла: %v", err),
+		}
+	}
+
+	// Конвертируем ключ в бинарный
+	binaryKey := convertInputToBinary(key)
+
+	// Проверяем минимальную длину ключа
+	if len(binaryKey) < 37 {
+		return OperationResult{
+			Success: false,
+			Message: fmt.Sprintf("Длина ключа должна быть минимум 37 бит. Текущая длина: %d бит", len(binaryKey)),
+		}
+	}
+
+	// Создаем LFSR и дешифруем (XOR симметричен)
+	lfsr := NewLFSR(binaryKey)
+	keyStream := lfsr.GenerateKeyStream(len(data))
+	decrypted := xorBytes(data, keyStream)
+
+	// Генерируем имя выходного файла
+	ext := filepath.Ext(inputPath)
+	baseName := strings.TrimSuffix(filepath.Base(inputPath), ext)
+	baseName = strings.TrimSuffix(baseName, "_encrypted")
+	defaultOutput := baseName + "_decrypted" + ext
+
+	// Выбираем место сохранения
+	outputPath, err := a.SelectOutputFile(defaultOutput)
+	if err != nil || outputPath == "" {
+		return OperationResult{
+			Success: false,
+			Message: "Не выбрано место сохранения",
+		}
+	}
+
+	// Сохраняем расшифрованный файл
+	err = os.WriteFile(outputPath, decrypted, 0644)
+	if err != nil {
+		return OperationResult{
+			Success: false,
+			Message: fmt.Sprintf("Ошибка сохранения файла: %v", err),
+		}
+	}
+
+	// Формируем отображение keystream
+	keyStreamDisplay := formatKeyStream(keyStream, 256)
+
+	return OperationResult{
+		Success:       true,
+		Message:       "Файл успешно расшифрован",
+		BinaryKey:     truncateString(binaryKey, 512),
+		KeyStream:     keyStreamDisplay,
+		OriginalSize:  len(data),
+		ProcessedSize: len(decrypted),
+		OutputPath:    outputPath,
+	}
 }
 
-// SaveFileDialog открывает диалог сохранения файла и возвращает выбранный путь
-func (a *App) SaveFileDialog() (string, error) {
-	file, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
-		Title: "Сохранить результат как",
-		Filters: []runtime.FileFilter{
-			{
-				DisplayName: "Все файлы",
-				Pattern:     "*",
-			},
-		},
-	})
-	if err != nil {
-		return "", err
+// Шифрование текста
+func (a *App) EncryptText(text, key string) OperationResult {
+	if text == "" {
+		return OperationResult{
+			Success: false,
+			Message: "Текст не может быть пустым",
+		}
 	}
-	return file, nil
+
+	if key == "" {
+		return OperationResult{
+			Success: false,
+			Message: "Ключ не может быть пустым",
+		}
+	}
+
+	binaryKey := convertInputToBinary(key)
+
+	if len(binaryKey) < 37 {
+		return OperationResult{
+			Success: false,
+			Message: fmt.Sprintf("Длина ключа должна быть минимум 37 бит. Текущая длина: %d бит", len(binaryKey)),
+		}
+	}
+
+	data := []byte(text)
+	lfsr := NewLFSR(binaryKey)
+	keyStream := lfsr.GenerateKeyStream(len(data))
+	encrypted := xorBytes(data, keyStream)
+
+	// Кодируем в base64 для безопасного отображения
+	encodedResult := base64.StdEncoding.EncodeToString(encrypted)
+	keyStreamDisplay := formatKeyStream(keyStream, 256)
+
+	return OperationResult{
+		Success:       true,
+		Message:       encodedResult,
+		BinaryKey:     truncateString(binaryKey, 512),
+		KeyStream:     keyStreamDisplay,
+		OriginalSize:  len(data),
+		ProcessedSize: len(encrypted),
+	}
+}
+
+// Дешифрование текста
+func (a *App) DecryptText(encodedText, key string) OperationResult {
+	if encodedText == "" {
+		return OperationResult{
+			Success: false,
+			Message: "Текст не может быть пустым",
+		}
+	}
+
+	if key == "" {
+		return OperationResult{
+			Success: false,
+			Message: "Ключ не может быть пустым",
+		}
+	}
+
+	// Декодируем из base64
+	data, err := base64.StdEncoding.DecodeString(encodedText)
+	if err != nil {
+		return OperationResult{
+			Success: false,
+			Message: "Ошибка декодирования: неверный формат зашифрованного текста",
+		}
+	}
+
+	binaryKey := convertInputToBinary(key)
+
+	if len(binaryKey) < 37 {
+		return OperationResult{
+			Success: false,
+			Message: fmt.Sprintf("Длина ключа должна быть минимум 37 бит. Текущая длина: %d бит", len(binaryKey)),
+		}
+	}
+
+	lfsr := NewLFSR(binaryKey)
+	keyStream := lfsr.GenerateKeyStream(len(data))
+	decrypted := xorBytes(data, keyStream)
+
+	keyStreamDisplay := formatKeyStream(keyStream, 256)
+
+	return OperationResult{
+		Success:       true,
+		Message:       string(decrypted),
+		BinaryKey:     truncateString(binaryKey, 512),
+		KeyStream:     keyStreamDisplay,
+		OriginalSize:  len(data),
+		ProcessedSize: len(decrypted),
+	}
+}
+
+// XOR двух массивов байт
+func xorBytes(data, keyStream []byte) []byte {
+	result := make([]byte, len(data))
+	for i := range data {
+		result[i] = data[i] ^ keyStream[i]
+	}
+	return result
+}
+
+// Форматирование keystream для отображения
+func formatKeyStream(keyStream []byte, maxBits int) string {
+	var sb strings.Builder
+	bitCount := 0
+
+	for _, b := range keyStream {
+		for i := 7; i >= 0 && bitCount < maxBits; i-- {
+			if (b>>i)&1 == 1 {
+				sb.WriteByte('1')
+			} else {
+				sb.WriteByte('0')
+			}
+			bitCount++
+			if bitCount%8 == 0 && bitCount < maxBits {
+				sb.WriteByte(' ')
+			}
+		}
+		if bitCount >= maxBits {
+			break
+		}
+	}
+
+	if len(keyStream)*8 > maxBits {
+		sb.WriteString("...")
+	}
+
+	return sb.String()
+}
+
+// Обрезка строки
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
