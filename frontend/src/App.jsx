@@ -240,7 +240,7 @@ function App() {
                         <div className="column-header">
                             <span className="column-label">Биты ключа (keystream):</span>
                             {keyStream && (
-                                <span className="column-count valid">{keyStream.replace('...', '').length}+ бит</span>
+                                <span className="column-count valid">{keyStream.replace('...', '').length} бит</span>
                             )}
                         </div>
                         <textarea

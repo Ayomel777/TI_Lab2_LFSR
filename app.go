@@ -22,7 +22,6 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 }
 
-// Результат операции
 type OperationResult struct {
 	Success       bool   `json:"success"`
 	Message       string `json:"message"`
@@ -32,7 +31,6 @@ type OperationResult struct {
 	ExtractedBits string `json:"extractedBits"`
 }
 
-// Результат валидации ключа
 type KeyValidationResult struct {
 	Valid     bool   `json:"valid"`
 	BinaryKey string `json:"binaryKey"`
@@ -40,7 +38,6 @@ type KeyValidationResult struct {
 	KeyLength int    `json:"keyLength"`
 }
 
-// Результат валидации ввода
 type InputValidationResult struct {
 	Valid         bool   `json:"valid"`
 	ExtractedBits string `json:"extractedBits"`
@@ -48,7 +45,6 @@ type InputValidationResult struct {
 	Message       string `json:"message"`
 }
 
-// Результат чтения файла
 type FileReadResult struct {
 	Success  bool   `json:"success"`
 	Message  string `json:"message"`
@@ -57,7 +53,6 @@ type FileReadResult struct {
 	FileSize int    `json:"fileSize"`
 }
 
-// Извлечение только 0 и 1 из строки
 func extractBits(input string) string {
 	var bits strings.Builder
 	for _, c := range input {
@@ -68,7 +63,6 @@ func extractBits(input string) string {
 	return bits.String()
 }
 
-// Валидация ввода - извлечение битов
 func (a *App) ValidateInput(input string) InputValidationResult {
 	if input == "" {
 		return InputValidationResult{
@@ -96,7 +90,6 @@ func (a *App) ValidateInput(input string) InputValidationResult {
 	}
 }
 
-// Валидация ключа - только 0 и 1, ровно 37 символов
 func (a *App) ValidateKey(input string) KeyValidationResult {
 	if input == "" {
 		return KeyValidationResult{
@@ -133,7 +126,6 @@ func (a *App) ValidateKey(input string) KeyValidationResult {
 	}
 }
 
-// Чтение файла и конвертация в биты
 func (a *App) SelectAndReadFile() FileReadResult {
 	file, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
 		Title: "Выберите файл для обработки",
@@ -164,7 +156,6 @@ func (a *App) SelectAndReadFile() FileReadResult {
 		}
 	}
 
-	// Конвертируем байты в биты
 	bits := bytesToBits(data)
 
 	return FileReadResult{
@@ -176,7 +167,6 @@ func (a *App) SelectAndReadFile() FileReadResult {
 	}
 }
 
-// Конвертация байтов в строку битов
 func bytesToBits(data []byte) string {
 	var bits strings.Builder
 	for _, b := range data {
@@ -191,9 +181,7 @@ func bytesToBits(data []byte) string {
 	return bits.String()
 }
 
-// Конвертация строки битов в байты
 func bitsToBytes(bits string) []byte {
-	// Дополняем до кратности 8
 	for len(bits)%8 != 0 {
 		bits = "0" + bits
 	}
@@ -211,9 +199,7 @@ func bitsToBytes(bits string) []byte {
 	return bytes
 }
 
-// Шифрование
 func (a *App) Encrypt(input string, key string) OperationResult {
-	// Валидация ввода
 	inputValidation := a.ValidateInput(input)
 	if !inputValidation.Valid {
 		return OperationResult{
@@ -222,7 +208,6 @@ func (a *App) Encrypt(input string, key string) OperationResult {
 		}
 	}
 
-	// Валидация ключа
 	keyValidation := a.ValidateKey(key)
 	if !keyValidation.Valid {
 		return OperationResult{
@@ -233,26 +218,22 @@ func (a *App) Encrypt(input string, key string) OperationResult {
 
 	bits := inputValidation.ExtractedBits
 
-	// Создаем LFSR и генерируем keystream
 	lfsr := NewLFSR(key)
 	keyStreamBits := lfsr.GenerateKeyStreamBits(len(bits))
 
-	// XOR битов
 	cipherBits := xorBits(bits, keyStreamBits)
 
 	return OperationResult{
 		Success:       true,
 		Message:       fmt.Sprintf("Зашифровано %d бит", len(bits)),
 		CipherText:    cipherBits,
-		KeyStream:     truncateString(keyStreamBits, 256),
+		KeyStream:     truncateString(keyStreamBits, 1000000000),
 		BitsCount:     len(bits),
 		ExtractedBits: bits,
 	}
 }
 
-// Дешифрование
 func (a *App) Decrypt(cipherText string, key string) OperationResult {
-	// Валидация шифротекста
 	inputValidation := a.ValidateInput(cipherText)
 	if !inputValidation.Valid {
 		return OperationResult{
@@ -261,7 +242,6 @@ func (a *App) Decrypt(cipherText string, key string) OperationResult {
 		}
 	}
 
-	// Валидация ключа
 	keyValidation := a.ValidateKey(key)
 	if !keyValidation.Valid {
 		return OperationResult{
@@ -272,24 +252,21 @@ func (a *App) Decrypt(cipherText string, key string) OperationResult {
 
 	bits := inputValidation.ExtractedBits
 
-	// Создаем LFSR и генерируем keystream
 	lfsr := NewLFSR(key)
 	keyStreamBits := lfsr.GenerateKeyStreamBits(len(bits))
 
-	// XOR битов (дешифрование = повторное шифрование)
 	plainBits := xorBits(bits, keyStreamBits)
 
 	return OperationResult{
 		Success:       true,
 		Message:       fmt.Sprintf("Расшифровано %d бит", len(bits)),
 		CipherText:    plainBits,
-		KeyStream:     truncateString(keyStreamBits, 256),
+		KeyStream:     truncateString(keyStreamBits, 1000000000),
 		BitsCount:     len(bits),
 		ExtractedBits: bits,
 	}
 }
 
-// XOR двух строк битов
 func xorBits(bits1, bits2 string) string {
 	result := make([]byte, len(bits1))
 	for i := 0; i < len(bits1); i++ {
@@ -302,9 +279,7 @@ func xorBits(bits1, bits2 string) string {
 	return string(result)
 }
 
-// Сохранение битов в файл
 func (a *App) SaveToFile(bits string, defaultName string) OperationResult {
-	// Валидация
 	inputValidation := a.ValidateInput(bits)
 	if !inputValidation.Valid {
 		return OperationResult{
@@ -315,7 +290,6 @@ func (a *App) SaveToFile(bits string, defaultName string) OperationResult {
 
 	cleanBits := inputValidation.ExtractedBits
 
-	// Выбор места сохранения
 	outputPath, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
 		Title:           "Сохранить файл",
 		DefaultFilename: defaultName,
@@ -328,10 +302,8 @@ func (a *App) SaveToFile(bits string, defaultName string) OperationResult {
 		}
 	}
 
-	// Конвертируем биты в байты
 	data := bitsToBytes(cleanBits)
 
-	// Сохраняем
 	err = os.WriteFile(outputPath, data, 0644)
 	if err != nil {
 		return OperationResult{
@@ -347,7 +319,6 @@ func (a *App) SaveToFile(bits string, defaultName string) OperationResult {
 	}
 }
 
-// Обрезка строки
 func truncateString(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
