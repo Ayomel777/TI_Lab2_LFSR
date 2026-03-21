@@ -1,5 +1,6 @@
 package main
 
+// LFSR структура для Linear Feedback Shift Register
 // Полином: x^37 + x^12 + x^10 + x^2 + 1
 type LFSR struct {
 	state     uint64
@@ -8,6 +9,7 @@ type LFSR struct {
 	isZeroKey bool
 }
 
+// NewLFSR создает новый LFSR с заданным начальным состоянием из бинарной строки (37 бит)
 func NewLFSR(binaryKey string) *LFSR {
 	const degree = 37
 
@@ -31,6 +33,7 @@ func NewLFSR(binaryKey string) *LFSR {
 	}
 }
 
+// NextBit генерирует следующий бит и сдвигает регистр
 func (l *LFSR) NextBit() byte {
 	if l.isZeroKey {
 		return 0
@@ -38,7 +41,6 @@ func (l *LFSR) NextBit() byte {
 
 	outputBit := byte(l.state & 1)
 
-	// Полином: x^37 + x^12 + x^10 + x^2 + 1
 	bit36 := (l.state >> 36) & 1
 	bit11 := (l.state >> 11) & 1
 	bit9 := (l.state >> 9) & 1
@@ -47,12 +49,33 @@ func (l *LFSR) NextBit() byte {
 	newBit := bit36 ^ bit11 ^ bit9 ^ bit1
 
 	l.state >>= 1
-
 	l.state |= newBit << 36
 
 	return outputBit
 }
 
+// GenerateKeyStreamBits генерирует поток ключей как строку битов
+func (l *LFSR) GenerateKeyStreamBits(length int) string {
+	bits := make([]byte, length)
+
+	if l.isZeroKey {
+		for i := 0; i < length; i++ {
+			bits[i] = '0'
+		}
+		return string(bits)
+	}
+
+	for i := 0; i < length; i++ {
+		if l.NextBit() == 1 {
+			bits[i] = '1'
+		} else {
+			bits[i] = '0'
+		}
+	}
+	return string(bits)
+}
+
+// NextByte генерирует следующий байт (8 бит)
 func (l *LFSR) NextByte() byte {
 	if l.isZeroKey {
 		return 0
@@ -66,6 +89,7 @@ func (l *LFSR) NextByte() byte {
 	return result
 }
 
+// GenerateKeyStream генерирует поток ключей заданной длины в байтах
 func (l *LFSR) GenerateKeyStream(length int) []byte {
 	keyStream := make([]byte, length)
 
@@ -79,6 +103,7 @@ func (l *LFSR) GenerateKeyStream(length int) []byte {
 	return keyStream
 }
 
+// GetState возвращает текущее состояние регистра как бинарную строку
 func (l *LFSR) GetState() string {
 	result := make([]byte, l.degree)
 	for i := 0; i < l.degree; i++ {
@@ -91,6 +116,7 @@ func (l *LFSR) GetState() string {
 	return string(result)
 }
 
+// IsZeroKey возвращает true, если ключ состоит из всех нулей
 func (l *LFSR) IsZeroKey() bool {
 	return l.isZeroKey
 }

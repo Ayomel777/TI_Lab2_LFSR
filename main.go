@@ -16,8 +16,8 @@ func main() {
 
 	err := wails.Run(&options.App{
 		Title:  "LFSR Encryption",
-		Width:  900,
-		Height: 700,
+		Width:  1100,
+		Height: 850,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},

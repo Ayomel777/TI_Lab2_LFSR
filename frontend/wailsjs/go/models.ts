@@ -1,5 +1,43 @@
 export namespace main {
 	
+	export class FileReadResult {
+	    success: boolean;
+	    message: string;
+	    bits: string;
+	    filePath: string;
+	    fileSize: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new FileReadResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.success = source["success"];
+	        this.message = source["message"];
+	        this.bits = source["bits"];
+	        this.filePath = source["filePath"];
+	        this.fileSize = source["fileSize"];
+	    }
+	}
+	export class InputValidationResult {
+	    valid: boolean;
+	    extractedBits: string;
+	    bitsCount: number;
+	    message: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new InputValidationResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.valid = source["valid"];
+	        this.extractedBits = source["extractedBits"];
+	        this.bitsCount = source["bitsCount"];
+	        this.message = source["message"];
+	    }
+	}
 	export class KeyValidationResult {
 	    valid: boolean;
 	    binaryKey: string;
@@ -21,11 +59,10 @@ export namespace main {
 	export class OperationResult {
 	    success: boolean;
 	    message: string;
-	    binaryKey: string;
+	    cipherText: string;
 	    keyStream: string;
-	    originalSize: number;
-	    processedSize: number;
-	    outputPath: string;
+	    bitsCount: number;
+	    extractedBits: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new OperationResult(source);
@@ -35,11 +72,10 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.success = source["success"];
 	        this.message = source["message"];
-	        this.binaryKey = source["binaryKey"];
+	        this.cipherText = source["cipherText"];
 	        this.keyStream = source["keyStream"];
-	        this.originalSize = source["originalSize"];
-	        this.processedSize = source["processedSize"];
-	        this.outputPath = source["outputPath"];
+	        this.bitsCount = source["bitsCount"];
+	        this.extractedBits = source["extractedBits"];
 	    }
 	}
 

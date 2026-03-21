@@ -1,226 +1,286 @@
-import {useState} from 'react';
-import {DecryptFile, EncryptFile, SelectInputFile, ValidateKey} from '../wailsjs/go/main/App';
+import { useState, useEffect } from 'react';
+import {
+    SelectAndReadFile,
+    Encrypt,
+    Decrypt,
+    ValidateKey,
+    ValidateInput,
+    SaveToFile
+} from '../wailsjs/go/main/App';
 import './App.css';
 
 function App() {
-    const [operation, setOperation] = useState('encrypt');
-    const [inputFile, setInputFile] = useState('');
-    const [key, setKey] = useState('');
-    const [result, setResult] = useState(null);
-    const [keyInfo, setKeyInfo] = useState(null);
+    const [mode, setMode] = useState('encrypt');
+    const [inputText, setInputText] = useState('');
+    const [register, setRegister] = useState('');
+    const [keyStream, setKeyStream] = useState('');
+    const [outputText, setOutputText] = useState('');
+    const [registerInfo, setRegisterInfo] = useState(null);
+    const [inputInfo, setInputInfo] = useState(null);
+    const [status, setStatus] = useState({ type: '', message: '' });
     const [loading, setLoading] = useState(false);
+    const [canSave, setCanSave] = useState(false);
+    const [fileExtension, setFileExtension] = useState('bin');
 
-    // Обработка выбора файла
-    const handleSelectFile = async () => {
+    useEffect(() => {
+        const validate = async () => {
+            if (register) {
+                const info = await ValidateKey(register);
+                setRegisterInfo(info);
+            } else {
+                setRegisterInfo(null);
+            }
+        };
+        validate();
+    }, [register]);
+
+    useEffect(() => {
+        const validate = async () => {
+            if (inputText) {
+                const info = await ValidateInput(inputText);
+                setInputInfo(info);
+            } else {
+                setInputInfo(null);
+            }
+        };
+        validate();
+    }, [inputText]);
+
+    const clearOutput = () => {
+        setOutputText('');
+        setKeyStream('');
+        setCanSave(false);
+        setStatus({ type: '', message: '' });
+    };
+
+    const getInputLabel = () => mode === 'encrypt' ? 'Исходный текст (биты):' : 'Шифротекст (биты):';
+    const getOutputLabel = () => mode === 'encrypt' ? 'Шифротекст (биты):' : 'Расшифрованный текст (биты):';
+    const getActionLabel = () => mode === 'encrypt' ? 'Зашифровать' : 'Расшифровать';
+
+    const handleOpenFile = async () => {
         try {
-            const file = await SelectInputFile();
-            if (file) {
-                setInputFile(file);
-                setResult(null);
+            const fileResult = await SelectAndReadFile();
+            if (fileResult.success) {
+                setInputText(fileResult.bits);
+                const fileName = fileResult.filePath.split(/[/\\]/).pop();
+                const ext = fileName.includes('.') ? fileName.split('.').pop() : 'bin';
+                setFileExtension(ext);
+                setStatus({ type: 'success', message: `Файл загружен: ${fileName} (${fileResult.fileSize} байт = ${fileResult.bits.length} бит)` });
+                clearOutput();
+            } else if (fileResult.message !== "Файл не выбран") {
+                setStatus({ type: 'error', message: fileResult.message });
             }
         } catch (err) {
-            console.error('Ошибка выбора файла:', err);
+            setStatus({ type: 'error', message: `Ошибка: ${err}` });
         }
     };
 
-    // Валидация ключа при вводе
-    const handleKeyChange = async (value) => {
-        setKey(value);
-        if (value) {
-            try {
-                const info = await ValidateKey(value);
-                setKeyInfo(info);
-            } catch (err) {
-                setKeyInfo(null);
+    const handleSaveFile = async () => {
+        if (!outputText) {
+            setStatus({ type: 'error', message: 'Нет данных для сохранения' });
+            return;
+        }
+
+        try {
+            const prefix = mode === 'encrypt' ? 'encrypted' : 'decrypted';
+            const defaultName = `${prefix}.${fileExtension}`;
+            const res = await SaveToFile(outputText, defaultName);
+            if (res.success) {
+                setStatus({ type: 'success', message: res.message });
+            } else {
+                setStatus({ type: 'error', message: res.message });
             }
-        } else {
-            setKeyInfo(null);
+        } catch (err) {
+            setStatus({ type: 'error', message: `Ошибка: ${err}` });
         }
     };
 
-    // Обработка операции
-    const handleProcess = async () => {
-        if (!key) {
-            setResult({success: false, message: 'Введите ключ'});
+    const handleAction = async () => {
+        if (!inputInfo?.valid) {
+            setStatus({ type: 'error', message: inputInfo?.message || 'Введите данные' });
             return;
         }
-
-        if (!inputFile) {
-            setResult({success: false, message: 'Выберите файл'});
-            return;
-        }
-
-        // Предварительная проверка ключа
-        const keyValidation = await ValidateKey(key);
-        if (!keyValidation.valid) {
-            setResult({success: false, message: keyValidation.message});
+        if (!registerInfo?.valid) {
+            setStatus({ type: 'error', message: registerInfo?.message || 'Введите корректный регистр' });
             return;
         }
 
         setLoading(true);
-        setResult(null);
+        setStatus({ type: '', message: '' });
 
         try {
             let res;
-            if (operation === 'encrypt') {
-                res = await EncryptFile(inputFile, key);
+            if (mode === 'encrypt') {
+                res = await Encrypt(inputText, register);
             } else {
-                res = await DecryptFile(inputFile, key);
+                res = await Decrypt(inputText, register);
             }
-            setResult(res);
+
+            if (res.success) {
+                setOutputText(res.cipherText);
+                setKeyStream(res.keyStream);
+                setCanSave(true);
+                setStatus({
+                    type: 'success',
+                    message: `${mode === 'encrypt' ? 'Зашифровано' : 'Расшифровано'} ${res.bitsCount} бит`
+                });
+            } else {
+                setStatus({ type: 'error', message: res.message });
+            }
         } catch (err) {
-            setResult({success: false, message: `Ошибка: ${err}`});
+            setStatus({ type: 'error', message: `Ошибка: ${err}` });
         }
 
         setLoading(false);
     };
 
+    const handleModeChange = (newMode) => {
+        setMode(newMode);
+        clearOutput();
+    };
+
+    const handleRegisterChange = (value) => {
+        setRegister(value);
+        clearOutput();
+    };
+
+    const handleInputChange = (value) => {
+        setInputText(value);
+        setFileExtension('bin');
+        clearOutput();
+    };
+
+    const canExecute = inputInfo?.valid && registerInfo?.valid && !loading;
+
     return (
         <div className="app-container">
             <header className="app-header">
-                <h1>🔐 LFSR Шифрование</h1>
+                <h1>Лабораторная работа — LFSR Шифрование</h1>
                 <p className="subtitle">Полином: x³⁷ + x¹² + x¹⁰ + x² + 1</p>
             </header>
 
-            <main className="main-content">
-                {/* Переключатель операции */}
-                <div className="toggle-section">
-                    <div className="toggle-group">
-                        <label>Операция:</label>
-                        <div className="toggle-buttons">
-                            <button
-                                className={`toggle-btn ${operation === 'encrypt' ? 'active' : ''}`}
-                                onClick={() => {
-                                    setOperation('encrypt');
-                                    setResult(null);
-                                }}
-                            >
-                                🔒 Шифрование
-                            </button>
-                            <button
-                                className={`toggle-btn ${operation === 'decrypt' ? 'active' : ''}`}
-                                onClick={() => {
-                                    setOperation('decrypt');
-                                    setResult(null);
-                                }}
-                            >
-                                🔓 Дешифрование
-                            </button>
-                        </div>
-                    </div>
+            <div className="app-content">
+                <div className="mode-selector">
+                    <label className={`mode-option ${mode === 'encrypt' ? 'active' : ''}`}>
+                        <input
+                            type="radio"
+                            name="mode"
+                            checked={mode === 'encrypt'}
+                            onChange={() => handleModeChange('encrypt')}
+                        />
+                        <span>Шифрование</span>
+                    </label>
+                    <label className={`mode-option ${mode === 'decrypt' ? 'active' : ''}`}>
+                        <input
+                            type="radio"
+                            name="mode"
+                            checked={mode === 'decrypt'}
+                            onChange={() => handleModeChange('decrypt')}
+                        />
+                        <span>Дешифрование</span>
+                    </label>
                 </div>
 
-                {/* Ввод данных */}
-                <div className="input-section">
-                    {/* Выбор файла */}
-                    <div className="file-input-group">
-                        <label>Входной файл:</label>
-                        <div className="file-input-row">
-                            <input
-                                type="text"
-                                value={inputFile}
-                                readOnly
-                                placeholder="Файл не выбран..."
-                                className="file-path-input"
-                            />
-                            <button onClick={handleSelectFile} className="select-file-btn">
-                                📁 Выбрать файл
-                            </button>
-                        </div>
-                        <p className="input-hint">
-                            Поддерживаются все типы файлов: изображения, видео, аудио, документы, архивы и др.
-                        </p>
-                    </div>
-
-                    {/* Ввод ключа */}
-                    <div className="key-input-group">
-                        <label>Ключ шифрования (37 бит):</label>
-                        <input
-                            type="text"
-                            value={key}
-                            onChange={(e) => handleKeyChange(e.target.value)}
-                            placeholder="Введите 37 символов (только 0 и 1)..."
-                            className={`key-input ${keyInfo ? (keyInfo.valid ? 'valid' : 'invalid') : ''}`}
-                            maxLength={50}
-                        />
-                        <div className="key-counter">
-              <span className={key.length === 37 ? 'valid-count' : key.length > 37 ? 'invalid-count' : ''}>
-                {key.length}
-              </span> / 37 символов
-                        </div>
-                    </div>
-
-                    {/* Информация о ключе */}
-                    {keyInfo && (
-                        <div className={`key-info ${keyInfo.valid ? 'valid' : 'invalid'}`}>
-                            <div className="key-info-header">
-                                {keyInfo.valid ? '✅' : '❌'} {keyInfo.message}
-                            </div>
-                            {key && (
-                                <div className="binary-key-display">
-                                    <strong>Введённый ключ:</strong>
-                                    <div className="binary-value">
-                                        {key.split('').map((char, index) => (
-                                            <span
-                                                key={index}
-                                                className={char === '0' || char === '1' ? 'valid-char' : 'invalid-char'}
-                                            >
-                        {char}
-                      </span>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {/* Кнопка обработки */}
+                <div className="file-buttons">
+                    <button onClick={handleOpenFile} className="file-btn open-btn">
+                        📁 Открыть файл
+                    </button>
                     <button
-                        onClick={handleProcess}
-                        className="process-btn"
-                        disabled={loading || !keyInfo?.valid || !inputFile}
+                        onClick={handleSaveFile}
+                        className="file-btn save-btn"
+                        disabled={!canSave}
                     >
-                        {loading
-                            ? '⏳ Обработка...'
-                            : (operation === 'encrypt' ? '🔒 Зашифровать файл' : '🔓 Расшифровать файл')
-                        }
+                        💾 Сохранить результат
                     </button>
                 </div>
 
-                {/* Результат */}
-                {result && (
-                    <div className={`result-section ${result.success ? 'success' : 'error'}`}>
-                        <h3>{result.success ? '✅ Успешно' : '❌ Ошибка'}</h3>
+                <div className="register-section">
+                    <div className="register-header">
+                        <span className="register-label">Начальное состояние регистра (ровно 37 бит):</span>
+                        <span className={`register-count ${register.length === 37 ? 'valid' : register.length > 37 ? 'invalid' : ''}`}>
+              {register.length}
+            </span>
+                        <span className="register-total">/ 37</span>
+                    </div>
+                    <input
+                        type="text"
+                        value={register}
+                        onChange={(e) => handleRegisterChange(e.target.value)}
+                        placeholder="Введите 37 бит (только 0 и 1)..."
+                        className={`register-input ${registerInfo ? (registerInfo.valid ? 'valid' : 'invalid') : ''}`}
+                        maxLength={37}
+                    />
+                    {registerInfo && !registerInfo.valid && (
+                        <div className="register-error">{registerInfo.message}</div>
+                    )}
+                </div>
 
-                        {result.success ? (
-                            <>
-                                <div className="result-info">
-                                    <p><strong>Статус:</strong> {result.message}</p>
-                                    <p><strong>Сохранено в:</strong> <span
-                                        className="file-path">{result.outputPath}</span></p>
-                                </div>
-
-                                <div className="crypto-info">
-                                    <h4>🔑 Криптографическая информация</h4>
-
-                                    <div className="info-block">
-                                        <strong>Использованный ключ (37 бит):</strong>
-                                        <div className="binary-display">{result.binaryKey}</div>
-                                    </div>
-
-                                    <div className="info-block">
-                                        <strong>Сгенерированный keystream (первые 256 бит):</strong>
-                                        <div className="binary-display">{result.keyStream}</div>
-                                    </div>
-
-                                </div>
-                            </>
-                        ) : (
-                            <p className="error-message">{result.message}</p>
+                <div className="columns-container">
+                    <div className="column">
+                        <div className="column-header">
+                            <span className="column-label">{getInputLabel()}</span>
+                            {inputInfo && (
+                                <span className={`column-count ${inputInfo.valid ? 'valid' : 'invalid'}`}>
+                  {inputInfo.valid ? `${inputInfo.bitsCount} бит` : '⚠️'}
+                </span>
+                            )}
+                        </div>
+                        <textarea
+                            value={inputText}
+                            onChange={(e) => handleInputChange(e.target.value)}
+                            placeholder="Введите биты (только 0 и 1) или загрузите файл..."
+                            className="column-textarea"
+                        />
+                        {inputInfo && !inputInfo.valid && (
+                            <div className="column-error">{inputInfo.message}</div>
                         )}
                     </div>
+
+                    <div className="column">
+                        <div className="column-header">
+                            <span className="column-label">Биты ключа (keystream):</span>
+                            {keyStream && (
+                                <span className="column-count valid">{keyStream.replace('...', '').length}+ бит</span>
+                            )}
+                        </div>
+                        <textarea
+                            value={keyStream}
+                            readOnly
+                            placeholder="Здесь появятся биты ключа после обработки..."
+                            className="column-textarea readonly"
+                        />
+                    </div>
+
+                    <div className="column">
+                        <div className="column-header">
+                            <span className="column-label">{getOutputLabel()}</span>
+                            {outputText && (
+                                <span className="column-count valid">{outputText.length} бит</span>
+                            )}
+                        </div>
+                        <textarea
+                            value={outputText}
+                            readOnly
+                            placeholder="Здесь появится результат после обработки..."
+                            className="column-textarea readonly"
+                        />
+                    </div>
+                </div>
+
+                <button
+                    onClick={handleAction}
+                    className={`action-btn ${mode === 'encrypt' ? 'encrypt' : 'decrypt'}`}
+                    disabled={!canExecute}
+                >
+                    {loading ? '⏳ Обработка...' : `${mode === 'encrypt' ? '🔒' : '🔓'} ${getActionLabel()}`}
+                </button>
+
+                {status.message && (
+                    <div className={`status-bar ${status.type}`}>
+                        {status.type === 'success' ? '✅' : '❌'} {status.message}
+                    </div>
                 )}
-            </main>
+            </div>
 
         </div>
     );
